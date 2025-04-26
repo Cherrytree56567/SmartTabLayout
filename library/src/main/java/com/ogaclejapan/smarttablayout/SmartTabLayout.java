@@ -26,6 +26,8 @@ import android.util.DisplayMetrics;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.LayoutInflater;
+import android.util.SparseIntArray;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.HorizontalScrollView;
@@ -83,6 +85,8 @@ public class SmartTabLayout extends HorizontalScrollView {
   private ViewPager.OnPageChangeListener viewPagerPageChangeListener;
   private OnScrollChangeListener onScrollChangeListener;
   private TabProvider tabProvider;
+  private boolean autoSelectOnScroll;
+  private SparseIntArray offsetArray = new SparseIntArray();
   private InternalTabClickListener internalTabClickListener;
   private OnTabClickListener onTabClickListener;
   private boolean distributeEvenly;
@@ -115,6 +119,7 @@ public class SmartTabLayout extends HorizontalScrollView {
     int customTabLayoutId = NO_ID;
     int customTabTextViewId = NO_ID;
     boolean clickable = TAB_CLICKABLE;
+    boolean autoSelectOnScroll = false;
     int titleOffset = (int) (TITLE_OFFSET_DIPS * density);
 
     TypedArray a = context.obtainStyledAttributes(
@@ -141,6 +146,8 @@ public class SmartTabLayout extends HorizontalScrollView {
         R.styleable.stl_SmartTabLayout_stl_clickable, clickable);
     titleOffset = a.getLayoutDimension(
         R.styleable.stl_SmartTabLayout_stl_titleOffset, titleOffset);
+    autoSelectOnScroll = a.getBoolean(
+            R.styleable.stl_SmartTabLayout_stl_autoSelectOnScroll, autoSelectOnScroll);
     a.recycle();
 
     this.titleOffset = titleOffset;
@@ -153,6 +160,7 @@ public class SmartTabLayout extends HorizontalScrollView {
     this.tabViewTextHorizontalPadding = textHorizontalPadding;
     this.tabViewTextMinWidth = textMinWidth;
     this.internalTabClickListener = clickable ? new InternalTabClickListener() : null;
+    this.autoSelectOnScroll = autoSelectOnScroll;
     this.distributeEvenly = distributeEvenly;
 
     if (customTabLayoutId != NO_ID) {
@@ -165,6 +173,10 @@ public class SmartTabLayout extends HorizontalScrollView {
       throw new UnsupportedOperationException(
           "'distributeEvenly' and 'indicatorAlwaysInCenter' both use does not support");
     }
+    if (autoSelectOnScroll && !tabStrip.isIndicatorAlwaysInCenter()) {
+      throw new UnsupportedOperationException(
+              "'autoSelectOnScroll' and 'indicatorAlwaysInCenter' both should be enabled");
+    }
 
     // Make sure that the Tab Strips fills this View
     setFillViewport(!tabStrip.isIndicatorAlwaysInCenter());
@@ -173,6 +185,27 @@ public class SmartTabLayout extends HorizontalScrollView {
 
   }
 
+  @Override
+  public boolean onTouchEvent(MotionEvent ev) {
+    if (autoSelectOnScroll) {
+      if (ev.getAction() == MotionEvent.ACTION_UP || ev.getAction() == MotionEvent.ACTION_CANCEL) {
+        int scrollX = getScrollX();
+        int currPos = viewPager.getCurrentItem();
+        int featureWidth = getTabAt(currPos).getMeasuredWidth();
+        // Calculate the compensation to add/remove to the scroll for tabs with different widths
+        for (int i = 0; i < currPos; i++) {
+          scrollX += (featureWidth - getTabAt(i).getMeasuredWidth());
+        }
+        int activeTab = ((scrollX + (featureWidth / 2)) / featureWidth);
+        int scrollTo = offsetArray.get(activeTab);
+        smoothScrollTo(scrollTo, 0);
+        viewPager.setCurrentItem(activeTab);
+        return true;
+      }
+    }
+    return super.onTouchEvent(ev);
+  }
+  
   @Override
   protected void onScrollChanged(int l, int t, int oldl, int oldt) {
     super.onScrollChanged(l, t, oldl, oldt);
@@ -201,6 +234,15 @@ public class SmartTabLayout extends HorizontalScrollView {
     // Ensure first scroll
     if (changed && viewPager != null) {
       scrollToTab(viewPager.getCurrentItem(), 0);
+    }
+
+    if (autoSelectOnScroll) {
+      int totalWidth = 0;
+      offsetArray.put(0, totalWidth);
+      for (int i = 1; i < tabStrip.getChildCount(); i++) {
+        totalWidth += getTabAt(i - 1).getMeasuredWidth();
+        offsetArray.put(i, totalWidth);
+      }
     }
   }
 
